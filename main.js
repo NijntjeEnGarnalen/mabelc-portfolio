@@ -70,6 +70,60 @@
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
   }
 
+  /* ---------- selected work: purple mouse trail ---------- */
+  const trailHost = $('.mq-wrap');
+  if (trailHost && matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    const cv = document.createElement('canvas');
+    cv.className = 'trail';
+    cv.setAttribute('aria-hidden', 'true');
+    trailHost.prepend(cv);
+    const ctx = cv.getContext('2d');
+    const LIFE = 1100;
+    let pts = [], raf = 0, dpr = 1, W = 0, H = 0;
+    const size = () => {
+      dpr = Math.min(2, window.devicePixelRatio || 1);
+      W = trailHost.clientWidth; H = trailHost.clientHeight;
+      cv.width = W * dpr; cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    size();
+    window.addEventListener('resize', size);
+    // fresh → old: light lavender → deep violet
+    const A = [214, 199, 255], Bc = [108, 56, 230];
+    const col = (k) => `rgb(${A.map((v, i) => Math.round(Bc[i] + (v - Bc[i]) * k)).join(',')})`;
+    const draw = () => {
+      raf = 0;
+      const now = performance.now();
+      pts = pts.filter((p) => now - p.t < LIFE);
+      ctx.clearRect(0, 0, W, H);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i];
+        if (b.t - a.t > 120) continue;
+        const life = 1 - (now - b.t) / LIFE;
+        if (life <= 0) continue;
+        ctx.globalAlpha = Math.min(1, life * 1.15);
+        ctx.strokeStyle = col(life);
+        ctx.lineWidth = 12 * (0.25 + 0.75 * life); // 12px = cursor dot size
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      if (pts.length) raf = requestAnimationFrame(draw);
+    };
+    window.addEventListener('mousemove', (e) => {
+      const r = trailHost.getBoundingClientRect();
+      if (e.clientY < r.top || e.clientY > r.bottom) return;
+      const x = e.clientX - r.left, y = e.clientY - r.top, t = performance.now();
+      const last = pts[pts.length - 1];
+      if (last && t - last.t < 120) {
+        const d = Math.hypot(x - last.x, y - last.y), n = Math.floor(d / 8);
+        for (let k = 1; k < n; k++) pts.push({ x: last.x + (x - last.x) * k / n, y: last.y + (y - last.y) * k / n, t: last.t + (t - last.t) * k / n });
+      }
+      pts.push({ x, y, t });
+      if (!raf) raf = requestAnimationFrame(draw);
+    }, { passive: true });
+  }
+
   /* ---------- home ---------- */
   const hero = $('#hero');
   if (!hero) return;
@@ -87,6 +141,8 @@
   const capT = $('.cap-t', zoom), capI = $('.cap-i', zoom);
   const items = JSON.parse(zoom.dataset.items);
   const mq = $('.mq');
+  const cardsSec = $('.cards');
+  const cards = cardsSec ? $$('.card', cardsSec) : [];
   let reduce = false;
   try { reduce = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
 
@@ -99,7 +155,13 @@
   };
   intro.addEventListener('click', enter);
   const hl = $('.hdr .logo');
-  if (hl) hl.addEventListener('click', (e) => { e.preventDefault(); enter(); });
+  const toSelected = (smooth) => {
+    const t = $('#selected');
+    if (!t) return;
+    window.scrollTo({ top: window.scrollY + t.getBoundingClientRect().top, behavior: smooth && !reduce ? 'smooth' : 'auto' });
+  };
+  if (hl) hl.addEventListener('click', (e) => { e.preventDefault(); toSelected(true); });
+  if (location.hash === '#selected') requestAnimationFrame(() => toSelected(false));
   if (location.hash === '#in') requestAnimationFrame(() => {
     const r = hero.getBoundingClientRect();
     window.scrollTo(0, window.scrollY + r.top + innerHeight * 0.18);
@@ -175,6 +237,19 @@
       zoom.setAttribute('aria-label', 'Open ' + items[idx].name);
     }
     $('.cap', zoom).style.opacity = cl((z - 0.85) / 0.15).toFixed(3);
+
+    // stacked cards: when the section ends, move the whole stack up together
+    // (plain sticky would push the last card up first, over the earlier ones)
+    if (cardsSec && cards.length) {
+      const sb = cardsSec.getBoundingClientRect().bottom - parseFloat(getComputedStyle(cardsSec).paddingBottom || 0);
+      const lims = cards.map((c) => parseFloat(getComputedStyle(c).top) + c.offsetHeight);
+      const B = Math.max(...lims);
+      const shift = Math.min(0, sb - B);
+      cards.forEach((c, i) => {
+        const own = Math.min(0, sb - lims[i]);
+        c.style.transform = shift < 0 ? `translateY(${(shift - own).toFixed(1)}px)` : '';
+      });
+    }
 
     // marquee
     if (mq) {
